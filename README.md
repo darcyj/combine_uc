@@ -1,7 +1,10 @@
 # combine_uc
 
-  	# Script to combine uc tables produced by dereplicating sequence reads and running 
-	# unoise. This speeds up the process of creating      a zOTU table using unoise. 
+  	# Written by John L. Darcy, June 2017
+	# See my website at http://amo.colorado.edu/jld/
+	
+	# Script to combine uc tables produced by dereplicating sequence reads and running 
+	# unoise. This speeds up the process of creating a zOTU table using unoise. 
 
 	# This program can be used to speed up making an OTU table using
 	# zero-radius OTUs (zOTUs) picked by unoise. Making a zOTU table
@@ -10,7 +13,7 @@
 	# clustered at 100% identity, it's fair to use centroid sequences
 	# in lieu of all raw reads. This speeds up the process greatly. 
 	
-	# Written by John L. Darcy, June 2017
+	# The R packages optparse and data.table are required to use this program.
 	
 	# Pipeline:
 	
