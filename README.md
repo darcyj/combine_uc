@@ -18,7 +18,7 @@
 		# this looks like >seqID;barcodelabel=sampleID
 	# 1. Dereplicate raw reads
 		# vsearch --derep_fulllength rawreads_renamed.fasta --output derep_seqs.fasta --uc derep_uctable.txt --sizeout
-	# 2. Run unoise on dereplicated reads
+	# 2. Run unoise on dereplicated reads to make zOTU seeds
 		# usearch -unoise3 derep_seqs.fasta -minsize 4 -zotus zotu_seeds.fasta
 	# 3. Map dereplicated reads onto zOTU seeds
 		# vsearch --usearch_global derep_seqs.fasta --db zotu_seeds.fasta --id 0.97 --threads 24 --maxaccepts 0 --maxrejects 0 --uc unoise_uctable.txt
