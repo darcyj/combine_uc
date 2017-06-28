@@ -3,9 +3,6 @@
   	# Written by John L. Darcy, June 2017
 	# See my website at http://amo.colorado.edu/jld/
 	
-	# Script to combine uc tables produced by dereplicating sequence reads and running 
-	# unoise. This speeds up the process of creating a zOTU table using unoise. 
-
 	# This program can be used to speed up making an OTU table using
 	# zero-radius OTUs (zOTUs) picked by unoise. Making a zOTU table
 	# can be done by mapping all raw sequence reads back onto zOTU seeds,
