@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-## script info:
+## Script info:
 	# This program can be used to speed up making an OTU table using
 	# zero-radius OTUs (zOTUs) picked by unoise. Making a zOTU table
 	# can be done by mapping all raw sequence reads back onto zOTU seeds,
@@ -23,12 +23,12 @@
 	# 4. Run this script
 		# combine_uc.r -d derep_uctable.txt -u unoise_uctable.txt -t 20 -o zOTUtable.txt
 
-## load in packages
+## Load in packages
 	suppressPackageStartupMessages(require(optparse))
 	suppressPackageStartupMessages(require(data.table))
 	suppressPackageStartupMessages(require(parallel))
 
-## make options for script
+## Make options for script
 
 	option_list <- list(
 		make_option(c("-d", "--derep_uc"), action="store", default=NA, type='character',
@@ -55,12 +55,12 @@
 	# The dereplicated fasta header should look like this:
 	# >uniqeid;barcodelabel=blahblah;size=1234
 
-## define status message function
+## Define status message function
 	msg <- function(x, noisy){
 		if(noisy){print(x)}
 	}
 
-## define mclapply2 function
+## Define mclapply2 function
 	# this is a version of mclapply that has a PROGRESS INDICATOR
 	# THANKS SO MUCH to wannymahoots on stackoverflow, what a HERO.
 	# https://stackoverflow.com/questions/10984556/is-there-way-to-track-progress-on-a-mclapply
@@ -106,7 +106,7 @@
 	}
 
 
-## read in input files
+## Read in input files
 
 	# in each uc table, col 9 is the sequence that is grouped into the zOTU/centroid in col 10.
 
@@ -123,14 +123,14 @@
 	unoise_uc <- fread(unoise_uctable_filename, sep='\t', header=F, stringsAsFactors=F)
 
 
-## prune useless rows from uc tables
+## Prune useless rows from uc tables
 
 	# here I just keep H=hit rows
 	# there are still self hits in there, with a *, but those are ignored later.
 	unoise_uc <- unoise_uc[unoise_uc[[1]] == "H",]
 	derep_uc <- derep_uc[derep_uc[[1]] == "H",]
 
-## remove size annotations from unoise_uc if they aren't also in derep_uc
+## Remove size annotations from unoise_uc if they aren't also in derep_uc
 
 	removesize <- function(x){
 		return(strsplit(x, split=";size=")[[1]][1])
@@ -141,10 +141,10 @@
 		unoise_uc[[9]] <- simplify2array(mclapply2(X=unoise_uc[[9]], FUN=removesize, mc.cores=ncores, mc.progress=noisy))
 	}
 
-## remove trailing semicolons from all columns where they could be (everything but zOTUs column)
+## Remove trailing semicolons from all columns where they could be (everything but zOTUs column)
 
 	# this is faster than adding them, and it's really important later that all names match up.
-	# here I assume that columns have unoform format, i.e. no misture of terminal ; and lack thereof.
+	# here I assume that columns have unoform format, i.e. no mixture of terminal ; and lack thereof.
 	lastchar <- function(x){
 		return(tail(strsplit(x, "")[[1]], 1))
 	}
@@ -164,12 +164,12 @@
 		unoise_uc[[9]] <- removelastchar(unoise_uc[[9]])
 	}
 
-## make vector of unique zOTU names
+## Make vector of unique zOTU names
 
 	zOTU_names <- unique(unoise_uc[[10]])
 	nzOTUs <- length(zOTU_names)
 
-## make vector of sampleids for derep_uc
+## Make vector of sampleids for derep_uc
 
 	# since each row of derep_uc corresponds to one hit, that hit has a sample associated with it.
 	# this function takes a usearch format label and returns the sampleid ("barcodelabel")
@@ -192,10 +192,6 @@
 ## Calculate final zOTU abundances
 
 	msg("Calculating final zOTU abundances.", noisy)
-
-	# make empty list, just because it's a habit of mine
-	zOTU_vec_list <- list(0)
-
 
 	# Function to get a row of an OTU table given the OTU name
 	# this function is DANGEROUS, because it uses objects in the global namespace
@@ -225,7 +221,7 @@
 	# use above function to calculate zOTU abundances by sample
 	zOTU_vec_list <- mclapply2(X=zOTU_names, FUN=get_zOTU_row, mc.cores=ncores, mc.progress=noisy)
 
-## make zOTU table and write to file
+## Make zOTU table and write to file
 	msg("Writing output to file.", noisy)
 
 	# transform list of vectors to matrix
@@ -240,7 +236,7 @@
 	# write out result
 	fwrite(zOTU_table, file=output_otutable_filename, quote=F, row.names=F, sep='\t')
 
-## all done
+## All done
 	msg("All done. Thanks for using my code, I hope it worked for you! Maybe cite my github page?", noisy)
 	msg("(https://github.com/darcyj/combine_uc)", noisy)
 	
