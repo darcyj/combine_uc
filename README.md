@@ -1,6 +1,7 @@
 # combine_uc
 
-  	# Script to combine uc tables produced by dereplicating sequence reads and running unoise. This speeds up the process of creating      a zOTU table using unoise. 
+  	# Script to combine uc tables produced by dereplicating sequence reads and running 
+	# unoise. This speeds up the process of creating      a zOTU table using unoise. 
 
 	# This program can be used to speed up making an OTU table using
 	# zero-radius OTUs (zOTUs) picked by unoise. Making a zOTU table
