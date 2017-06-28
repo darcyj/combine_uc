@@ -1,4 +1,4 @@
-# combine_uc
+# combine_uc.r
 
   	# Written by John L. Darcy, June 2017
 	# See my website at http://amo.colorado.edu/jld/
