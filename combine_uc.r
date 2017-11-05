@@ -227,8 +227,11 @@
 	# transform list of vectors to matrix
 	zOTU_table <- t(simplify2array(zOTU_vec_list))
 
-	# new diagnostic message
-	print(head(zOTU_table))
+	# solve for corner case where zOTU_table has only one column (since R doesn't discriminate between
+	# row and column vectors)
+	if (all(lapply(X=test2, FUN=length) == 1)){
+		zOTU_table <- data.frame(x=simplify2array(zOTU_vec_list))
+	}
 
 	# add column names for sampleIDs
 	colnames(zOTU_table) <- derep_uc_sampleids_unique
