@@ -227,6 +227,9 @@
 	# transform list of vectors to matrix
 	zOTU_table <- t(simplify2array(zOTU_vec_list))
 
+	# print diagnostic message
+	print(derep_uc_sampleids_unique)
+
 	# add column names for sampleIDs
 	colnames(zOTU_table) <- derep_uc_sampleids_unique
 
