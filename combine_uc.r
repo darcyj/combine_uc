@@ -229,7 +229,7 @@
 
 	# solve for corner case where zOTU_table has only one column (since R doesn't discriminate between
 	# row and column vectors)
-	if (all(lapply(X=test2, FUN=length) == 1)){
+	if (all(lapply(X=zOTU_vec_list, FUN=length) == 1)){
 		zOTU_table <- data.frame(x=simplify2array(zOTU_vec_list))
 	}
 
