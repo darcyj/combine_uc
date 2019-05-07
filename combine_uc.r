@@ -1,257 +1,166 @@
 #!/usr/bin/env Rscript
 
-## Script info:
-	# This program can be used to speed up making an OTU table using
-	# zero-radius OTUs (zOTUs) picked by unoise. Making a zOTU table
-	# can be done by mapping all raw sequence reads back onto zOTU seeds,
-	# but this is very time consuming. Since dereplicated reads are 
-	# clustered at 100% identity, it's fair to use centroid sequences
-	# in lieu of all raw reads. This speeds up the process greatly. 
-	
-	# Written by John L. Darcy, June 2017
-	
-	# Pipeline:
-	
-	# 0. Format raw read fasta headers to be in usearch format. 
-		# this looks like >seqID;barcodelabel=sampleID
-	# 1. Dereplicate raw reads
-		# vsearch --derep_fulllength rawreads_renamed.fasta --output derep_seqs.fasta --uc derep_uctable.txt --sizeout
-	# 2. Run unoise on dereplicated reads
-		# usearch -unoise3 derep_seqs.fasta -minsize 4 -zotus zotu_seeds.fasta
-	# 3. Map dereplicated reads onto zOTU seeds
-		# vsearch --usearch_global derep_seqs.fasta --db zotu_seeds.fasta --id 0.97 --threads 24 --maxaccepts 0 --maxrejects 0 --uc unoise_uctable.txt
-	# 4. Run this script
-		# combine_uc.r -d derep_uctable.txt -u unoise_uctable.txt -t 20 -o zOTUtable.txt
+## This program combines two UC tables, where one is nested within the other.
+	# output is an otu table.
 
-## Load in packages
+## load in packages
 	suppressPackageStartupMessages(require(optparse))
-	suppressPackageStartupMessages(require(data.table))
 	suppressPackageStartupMessages(require(parallel))
+	suppressPackageStartupMessages(require(data.table))
 
-## Make options for script
-
+## make options for script
 	option_list <- list(
-		make_option(c("-d", "--derep_uc"), action="store", default=NA, type='character',
-			help="Path to uc table produced by dereplication"), 
-		make_option(c("-u", "--unoise_uc"), action="store", default=NA, type='character',
-			help="Path to uc table produced by unoise"), 
+		make_option(c("--lo"), action="store", default=NA, type='character',
+			help="Lower-level uc table, produced first. Larger file."), 
+		make_option(c("--hi"), action="store", default=NA, type='character',
+			help="Higher-level uc table, produced second. Smaller file."), 
 		make_option(c("-o", "--output"), action="store", default=NA, type='character',
-			help="Output filename for zOTU table"),
-		make_option(c("-q", "--quiet"), action="store_true", default=FALSE, type='logical',
-			help="Turns off satus messages and progress indicators"),
+			help="Output filename for summary table (OTU table)"),
 		make_option(c("-t", "--threads"), action="store", default=4, type='integer',
 			help="Number of threads to use for parallel processing.")
 	)
 	
 	# parse option arguments
 	opt = parse_args(OptionParser(option_list=option_list))
-	derep_uctable_filename <- opt$derep_uc
-	unoise_uctable_filename <- opt$unoise_uc
-	output_otutable_filename <- opt$output
-	ncores <- opt$threads
-	noisy <- !(opt$quiet)
 
-## IMPORTANT NOTE: original sequence names (in derep_uc) need to contain barcodelabels. 
-	# The dereplicated fasta header should look like this:
-	# >uniqeid;barcodelabel=blahblah;size=1234
-
-## Define status message function
-	msg <- function(x, noisy){
-		if(noisy){print(x)}
+## just here for testing
+	if(FALSE){
+		opt=list(lo="seq2derep_uctable.txt.gz", hi="derep2esv_uctable.txt.gz", threads=12, output="esv_table.txt")
 	}
 
-## Define mclapply2 function
-	# this is a version of mclapply that has a PROGRESS INDICATOR
-	# THANKS SO MUCH to wannymahoots on stackoverflow, what a HERO.
-	# https://stackoverflow.com/questions/10984556/is-there-way-to-track-progress-on-a-mclapply
-	mclapply2 <- function(X, FUN, ..., 
-		mc.preschedule = TRUE, mc.set.seed = TRUE,
-		mc.silent = FALSE, mc.cores = getOption("mc.cores", 2L),
-		mc.cleanup = TRUE, mc.allow.recursive = TRUE,
-		mc.progress=TRUE, mc.style=3) 
-	{
-		if (!is.vector(X) || is.object(X)) X <- as.list(X)
 
-		if (mc.progress) {
-			f <- fifo(tempfile(), open="w+b", blocking=T)
-			p <- parallel:::mcfork()
-			pb <- txtProgressBar(0, length(X), style=mc.style)
-			setTxtProgressBar(pb, 0) 
-			progress <- 0
-			if (inherits(p, "masterProcess")) {
-				while (progress < length(X)) {
-					readBin(f, "double")
-					progress <- progress + 1
-					setTxtProgressBar(pb, progress) 
-				}
-				cat("\n")
-				parallel:::mcexit()
+## read in input files
+	# in each uc table, col 9 is the sequence that is grouped into the ESV/centroid in col 10.
+	
+	# uc_lo is the lower-level uctable, i.e. uc_hi will be nested within it.
+	# it will have been generated first, and be a much larger file than uc_hi.
+	message("Reading in lower-level uc file...")
+	uc_lo <- fread(opt$lo, sep='\t', header=F, stringsAsFactors=F)
+	message("   ...done.")
+	
+	# uc_hi is the higher-level uctable
+	# it will have been generated second, and be a much smaller file than uc_hi.
+	message("Reading in higher-level uc file...")
+	uc_hi <- fread(opt$hi, sep='\t', header=F, stringsAsFactors=F)
+	message("   ...done.")
+
+## prune useless data from uc tables
+	message("Pruning inputs...")
+
+	# remove S and N rows. These are "no-hit" and "summary" rows.
+	# thus, KEEP "C" and "H" rows. These are "centroid" and "hit" rows. 
+	uc_lo <- uc_lo[uc_lo[[1]] %in% c("C", "H"),]
+	uc_hi <- uc_hi[uc_hi[[1]] %in% c("C", "H"),]
+	# make centroids self-referential so they can be counted.
+	# otherwise, the count of each lower-level cluster will be off-by-one.
+	uc_lo[[10]][uc_lo[[10]]=="*"] <- uc_lo[[9]][uc_lo[[10]]=="*"]
+
+	# remove useless columns:
+	uc_lo <- uc_lo[, 9:10]
+	uc_hi <- uc_hi[, 9:10]
+	message("   ...done.")\
+
+## check inputs before computationally intensive steps
+	message("Quickly checking inputs...")
+	if(grepl(pattern=";barcodelabel=", x=uc_lo[[1]][1]) && grepl(pattern=";barcodelabel=", x=uc_lo[[2]][1])){
+		message("...lower-level uc file looks OK.")
+	}else{
+		stop("ERROR: no barcodelabel found in lower-level uc file.")
+	}
+	if(grepl(pattern=";barcodelabel=", x=uc_hi[[1]][1])){
+		message("...higher-level uc file looks OK.")
+	}else{
+		stop("ERROR: no barcodelabel found in higher-level uc file.")
+	}
+
+
+
+
+## digest labels into component parts (seqid, barcodelabel)
+	# to enable quick boolean operations
+	get_bclabel <- function(h){
+		h_sep <- unlist(strsplit(h, split=";"))
+		return(sub("barcodelabel=", "", h_sep[grep("barcodelabel=", h_sep)]))
+	}
+	get_seqid <- function(h){
+		return(unlist(strsplit(h, split=";"))[1])
+	}
+	# uc_lo columns become sample and seq, uc_hi cols become seq and esv
+	message("Extracting sample info...")
+	colnames(uc_hi) <- c("seq", "esv")
+	colnames(uc_lo) <- c("sample", "seq")
+	uc_lo$sample <- as.factor(simplify2array(mclapply(X=uc_lo$sample, FUN=get_bclabel, mc.cores=opt$threads)))
+	message("   ...1/3 columns done.")
+	uc_lo$seq <- simplify2array(mclapply(X=uc_lo$seq, FUN=get_seqid, mc.cores=opt$threads))
+	message("   ...2/3 columns done.")
+	uc_hi$seq <- simplify2array(mclapply(X=uc_hi$seq, FUN=get_seqid, mc.cores=opt$threads))
+	message("   ...3/3 columns done.")
+
+## for each zOTU, calculate abundances across samples.
+	message("Making final table...")
+	unique_samples <- unique(uc_lo$sample)
+	unique_esvs <- unique(uc_hi$esv)
+	n_esvs <- length(unique_esvs)
+
+	# break up esvs into chunks of bmult*ncores and do 'em
+	# i wrote this without putting enough comments in my code and now i don't know how it works
+	# don't do this, kiddos
+	bmult <- 3
+	esv_bins <- rep(1:(ceiling(n_esvs / opt$threads /bmult) ), each=opt$threads * bmult)[1:n_esvs]
+	process_bin <- function(bin_number){
+		get_row <- function(esv){ return(table(uc_lo$sample[uc_lo$seq %in% uc_hi$seq[uc_hi$esv == esv]])) }
+
+			get_ESV_row <- function(ESV){
+				# find which derep centroids are within ESV_i, get their sampleids too
+				ESV_rowsTF <- unoise_uc[[10]] == ESV
+				centroids_i <- unoise_uc[[9]] [ESV_rowsTF]
+				
+				# get all sampleids of original sequences within those centroids (incl. centroids themselves)
+				sampids_i <- c(derep_uc_sampleids[derep_uc[[10]] %in% centroids_i], centroid_sampleids [ESV_rowsTF])
+				
+				# make sampids_i a factor so that table returns empty fields
+				# this makes it work when an OTU isn't observed in a sample.
+				# note that same derep_uc_sampleids_unique is used later as the colnames for the ESV table
+				sampids_i <- factor(sampids_i, levels=derep_uc_sampleids_unique)
+				
+				# make otu table row. table() will be sorted in the same order as derep_uc_sampleids_unique.
+				return(as.numeric(table(sampids_i)))
 			}
-		}
-		tryCatch({
-			result <- mclapply(X, ..., function(...) {
-					res <- FUN(...)
-					if (mc.progress) writeBin(1, f)
-					res
-				}, 
-				mc.preschedule = mc.preschedule, mc.set.seed = mc.set.seed,
-				mc.silent = mc.silent, mc.cores = mc.cores,
-				mc.cleanup = mc.cleanup, mc.allow.recursive = mc.allow.recursive
-			)
 
-		}, finally = {
-			if (mc.progress) close(f)
-		})
-		result
+
+		esvs_i <- unique_esvs[esv_bins == bin_number]
+		submat <- simplify2array(mclapply(X=esvs_i, FUN=get_row, mc.cores=opt$threads)) 
+		colnames(submat) <- esvs_i
+		return(submat)
 	}
 
 
-## Read in input files
+## process each bin in parallel, but do bins serially. this is a compromise that
+	# saves memory use and allows for a progress bar with no overhead.
+	esvlist <- vector("list", max(esv_bins))
+	message("...processing bins of ESVs in parallel...")
+	pb <- txtProgressBar(min=0, max=max(esv_bins), style=3)
+	for(b in 1:max(esv_bins)){
+		esvlist[[b]] <- process_bin(b)
+		setTxtProgressBar(pb, b)
 
-	# in each uc table, col 9 is the sequence that is grouped into the zOTU/centroid in col 10.
-
-	# derep_uc is the uc table generated by dereplication of raw reads.
-	# it should be generated using something like,
-	# vsearch --derep_fulllength allseqs_renamed.fasta --output derep_seqs.fasta --uc derep_uctable.txt --sizeout
-	msg("Reading in derep uc file.", noisy)
-	derep_uc <- fread(derep_uctable_filename, sep='\t', header=F, stringsAsFactors=F)
-
-	# unoise_uc is the uc table generated by mapping dereplicated reads onto unoise seeds
-	# it should be generated using something like,
-	# vsearch --usearch global derep_seqs.fasta --db zotu_seeds.fasta --id 0.97 --threads 24 --maxaccepts 0 --maxrejects 0 --uc unoise_uctable.txt
-	msg("Reading in unoise uc file.", noisy)
-	unoise_uc <- fread(unoise_uctable_filename, sep='\t', header=F, stringsAsFactors=F)
-
-
-## Prune useless rows from uc tables
-
-	# here I just keep H=hit rows
-	# there are still self hits in there, with a *, but those are ignored later.
-	unoise_uc <- unoise_uc[unoise_uc[[1]] == "H",]
-	derep_uc <- derep_uc[derep_uc[[1]] == "H",]
-
-## Remove size annotations from unoise_uc if they aren't also in derep_uc
-
-	removesize <- function(x){
-		return(strsplit(x, split=";size=")[[1]][1])
 	}
-	if(grepl("size=", derep_uc[[10]][1]) == FALSE){
-		msg("Fixing names in unoise uc file.", noisy)
-		msg("If you are seeing this message, you may want to pre-process that file with awk in order to remove size annotations from the 9th column. Leave off the terminal semicolon while you're at it for maximum speedup. That said, this process is parallelized and goes pretty fast.", noisy)
-		unoise_uc[[9]] <- simplify2array(mclapply2(X=unoise_uc[[9]], FUN=removesize, mc.cores=ncores, mc.progress=noisy))
-	}
-
-## Remove trailing semicolons from all columns where they could be (everything but zOTUs column)
-
-	# this is faster than adding them, and it's really important later that all names match up.
-	# here I assume that columns have unoform format, i.e. no mixture of terminal ; and lack thereof.
-	lastchar <- function(x){
-		return(tail(strsplit(x, "")[[1]], 1))
-	}
-	removelastchar <- function(x){
-		return(gsub('.{1}$', '', x))
-	}
-	if(lastchar(derep_uc[[9]][[1]]) == ";"){
-		msg("Removing terminal semicolons from derep uc column 9.", noisy)
-		derep_uc[[9]] <- removelastchar(derep_uc[[9]])
-	}
-	if(lastchar(derep_uc[[10]][[1]]) == ";"){
-		msg("Removing terminal semicolons from derep uc column 10.", noisy)
-		derep_uc[[10]] <- removelastchar(derep_uc[[10]])
-	}
-	if(lastchar(unoise_uc[[9]][[1]]) == ";"){
-		msg("Removing terminal semicolons from unoise uc column 9.", noisy)
-		unoise_uc[[9]] <- removelastchar(unoise_uc[[9]])
-	}
-
-## Make vector of unique zOTU names
-
-	zOTU_names <- unique(unoise_uc[[10]])
-	nzOTUs <- length(zOTU_names)
-
-## Make vector of sampleids for derep_uc
-
-	# since each row of derep_uc corresponds to one hit, that hit has a sample associated with it.
-	# this function takes a usearch format label and returns the sampleid ("barcodelabel")
-	get_sampleid <- function(x){
-		return(gsub(pattern=".*barcodelabel=(.*);?;?", replacement="\\1", x))
-	}
-	
-	# apply that function to all the sequence IDs, in parallel
-	msg("Extracting sampleIDs from sequence names.", noisy)
-	derep_uc_sampleids <- simplify2array(mclapply2(X=derep_uc[[9]], FUN=get_sampleid, mc.cores=ncores, mc.progress=noisy))
-	
-	# get sampleids from centroids in advance
-	msg("Extracting centroid sampleIDs.", noisy)
-	centroid_sampleids <- simplify2array(mclapply2(X=unoise_uc[[9]], FUN=get_sampleid, mc.cores=ncores, mc.progress=noisy))
-
-	# unique sampleids for iteration
-	derep_uc_sampleids_unique <- unique(derep_uc_sampleids)
-	derep_uc_sampleids_unique <- derep_uc_sampleids_unique[order(derep_uc_sampleids_unique)]
-
-## Calculate final zOTU abundances
-
-	msg("Calculating final zOTU abundances.", noisy)
-
-	# Function to get a row of an OTU table given the OTU name
-	# this function is DANGEROUS, because it uses objects in the global namespace
-	# without taking them as arguments. This is usually a no-no, but I'm doing it
-	# so that when the function is parallelized, it doesn't use ALL THE RAM. 
-	# I tried using "big.matrix" from "bigmemory" package, and it was worse,
-	# even AFTER aliasing all of the inputs. 
-	# note that the function does NOT write to these objects.
-	# In this function, i refers to the zOTU itself. Originally a loop (blegh).
-	get_zOTU_row <- function(zOTU){
-		# find which derep centroids are within zOTU_i, get their sampleids too
-		zOTU_rowsTF <- unoise_uc[[10]] == zOTU
-		centroids_i <- unoise_uc[[9]] [zOTU_rowsTF]
-		
-		# get all sampleids of original sequences within those centroids (incl. centroids themselves)
-		sampids_i <- c(derep_uc_sampleids[derep_uc[[10]] %in% centroids_i], centroid_sampleids [zOTU_rowsTF])
-		
-		# make sampids_i a factor so that table returns empty fields
-		# this makes it work when an OTU isn't observed in a sample.
-		# note that same derep_uc_sampleids_unique is used later as the colnames for the zOTU table
-		sampids_i <- factor(sampids_i, levels=derep_uc_sampleids_unique)
-		
-		# make otu table row. table() will be sorted in the same order as derep_uc_sampleids_unique.
-		return(as.numeric(table(sampids_i)))
-	}
-	
-	# use above function to calculate zOTU abundances by sample
-	zOTU_vec_list <- mclapply2(X=zOTU_names, FUN=get_zOTU_row, mc.cores=ncores, mc.progress=noisy)
-
-## Make zOTU table and write to file
-	msg("Writing output to file.", noisy)
-
-	# transform list of vectors to matrix
-	zOTU_table <- t(simplify2array(zOTU_vec_list))
-
-	# solve for corner case where zOTU_table has only one column (since R doesn't discriminate between
-	# row and column vectors)
-	if (all(lapply(X=zOTU_vec_list, FUN=length) == 1)){
-		zOTU_table <- data.frame(x=simplify2array(zOTU_vec_list))
-	}
-
-	# add column names for sampleIDs
-	colnames(zOTU_table) <- derep_uc_sampleids_unique
-
-	# add column for zOTU labels (NOT rownames - R won't print a header for rownames)
-	zOTU_table <- data.table("SampleID"=zOTU_names, zOTU_table)
-
-	# write out result
-	fwrite(zOTU_table, file=output_otutable_filename, quote=F, row.names=F, sep='\t')
-
-## All done
-	msg("All done. Thanks for using my code, I hope it worked for you! Maybe cite my github page?", noisy)
-	msg("(https://github.com/darcyj/combine_uc)", noisy)
-	
+	message("")
 
 
 
+	# esvlist <- lapply(X=1:max(esv_bins), FUN=process_bin)
+	message("...writing out table...")
+	otutable <- t(do.call("cbind", esvlist))
+
+	# turn otutable into list of cols so it can be more quickly written out with fwrite
+	# cols are used because fwrite transposes output for whatever reason.
+	cols2write <- lapply(X=1:ncol(otutable), FUN=function(i){as.vector(c(colnames(otutable)[i], otutable[,i]))})
+	# add OTU_ID row
+	cols2write <- append( list(c("OTU_ID", rownames(otutable))), cols2write)
 
 
 
+	fwrite(file=opt$output, x=cols2write, row.names=FALSE, sep='\t', quote=FALSE)
 
-
-
+	message("   ...all done.")
