@@ -24,3 +24,9 @@
 		vsearch --usearch_global derep_seqs.fasta --db esv_seqs.fasta --id 0.97 --threads 12 --maxaccepts 0 --maxrejects 0 --uc derep2esv_uctable.txt
 	# 4. Run this script
 		./combine_uc.r --lo seq2derep_uctable.txt.gz --hi derep2esv_uctable.txt.gz -t 12 -o esv_table.txt
+
+	# arguments for the script:
+		# --lo lower-level uc table, i.e. the one that was made first.
+		# --hi higher-level uc table, i.e. the one that was made second and is nested within the first.
+		# -o/--output output fp for table
+		# -t/--threads number of cpu threads to use for parallelization
