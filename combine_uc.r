@@ -138,7 +138,7 @@
 ## process each bin in parallel, but do bins serially. this is a compromise that
 	# saves memory use and allows for a progress bar with no overhead.
 	esvlist <- vector("list", max(esv_bins))
-	message("...processing bins of ESVs in parallel...")
+	message("   ...processing bins of ESVs in parallel...")
 	pb <- txtProgressBar(min=0, max=max(esv_bins), style=3)
 	for(b in 1:max(esv_bins)){
 		esvlist[[b]] <- process_bin(b)
@@ -150,7 +150,7 @@
 
 
 	# esvlist <- lapply(X=1:max(esv_bins), FUN=process_bin)
-	message("...writing out table...")
+	message("   ...writing out table...")
 	otutable <- t(do.call("cbind", esvlist))
 
 	# turn otutable into list of cols so it can be more quickly written out with fwrite
